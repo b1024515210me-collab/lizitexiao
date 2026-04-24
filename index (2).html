@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>粒子交互网站 - 多场景沉浸</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@200;400;600&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body, html {
+            width: 100%; height: 100%; overflow: hidden;
+            background-color: #050505; font-family: 'Montserrat', sans-serif;
+            color: #ffffff; touch-action: none;
+        }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        
+        /* UI 叠层 */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10; pointer-events: none; display: flex; flex-direction: column;
+            justify-content: space-between; padding: 40px;
+        }
+
+        .top-nav { display: flex; justify-content: space-between; pointer-events: auto; }
+        .icon-btn { background: transparent; border: none; color: rgba(255, 255, 255, 0.7); font-size: 24px; cursor: pointer; transition: color 0.3s; }
+        .icon-btn:hover { color: #fff; }
+
+        /* 居中文字面板 */
+        .center-titles {
+            position: absolute; top: 50%; left: 10%; transform: translateY(-50%);
+            text-shadow: 0 0 20px rgba(0, 150, 255, 0.5);
+            transition: opacity 0.5s ease;
+        }
+        #page-number { font-size: 1.5rem; font-weight: 200; letter-spacing: 10px; margin-bottom: 10px; color: rgba(255, 255, 255, 0.8); }
+        #page-title { font-size: 3rem; font-weight: 600; letter-spacing: 15px; text-transform: uppercase; white-space: pre-line; }
+        #page-subtitle {
+            margin-top: 20px; font-size: 0.9rem; color: rgba(255, 255, 255, 0.6);
+            letter-spacing: 2px; font-weight: 400; display: flex; align-items: center; gap: 10px;
+        }
+
+        /* 底部导航 */
+        .bottom-nav { display: flex; justify-content: center; align-items: flex-end; gap: 15px; pointer-events: auto; }
+        .nav-dot { width: 10px; height: 10px; border-radius: 50%; background-color: rgba(255, 255, 255, 0.3); cursor: pointer; transition: all 0.3s ease; }
+        .nav-dot:hover { background-color: rgba(255, 255, 255, 0.8); }
+        .nav-dot.active { background-color: #fff; box-shadow: 0 0 10px #fff; transform: scale(1.2); }
+
+        /* 白屏闪烁遮罩（烟花爆炸瞬间使用） */
+        #flash-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #ffffff; opacity: 0; pointer-events: none; z-index: 5;
+        }
+
+        @media (max-width: 768px) {
+            .center-titles { left: 5%; text-align: center; width: 90%; }
+            #page-title { font-size: 2rem; letter-spacing: 8px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    <div id="flash-overlay"></div>
+
+    <div id="ui-layer">
+        <div class="top-nav">
+            <button class="icon-btn">☰</button>
+            <button class="icon-btn">?</button>
+        </div>
+
+        <div class="center-titles" id="text-container">
+            <h2 id="page-number">01</h2>
+            <h1 id="page-title">EXPLORE<br>THE UNIVERSE</h1>
+            <div id="page-subtitle">🖱️ 拖拽探索宇宙 / 点击聚焦星体</div>
+        </div>
+
+        <div class="bottom-nav" id="nav-container">
+            <div class="nav-dot active" data-target="0"></div>
+            <div class="nav-dot" data-target="1"></div>
+            <div class="nav-dot" data-target="2"></div>
+            <div class="nav-dot" data-target="3"></div>
+            <div class="nav-dot" data-target="4"></div>
+            <div class="nav-dot" data-target="5"></div>
+        </div>
+    </div>
+
+    <!-- 引入库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+
+    <script>
+        // --- 页面配置数据 ---
+        const PAGE_CONFIG = [
+            { id: '01', title: 'EXPLORE\nTHE UNIVERSE', subtitle: '🖱️ 拖拽探索宇宙 / 点击聚焦星体', camPos: [2, 3, 5], targetPos: [0, 0, 0] },
+            { id: '02', title: 'FLOW\nOF SOUND', subtitle: '🖱️ 移动产生声波涟漪 / 点击增强强度', camPos: [0, 15, 20], targetPos: [0, 0, 0] },
+            { id: '03', title: 'TREE OF\nLIFE', subtitle: '🖱️ 移动鼠标吹动树叶 / 点击催生新枝', camPos: [0, 8, 25], targetPos: [0, 5, 0] },
+            { id: '04', title: 'PARTICLE\nKOI', subtitle: '🖱️ 滑动水流 / 点击投喂抢食，锦鲤会吞噬成长', camPos: [0, 20, 15], targetPos: [0, 0, 0] },
+            { id: '05', title: 'ENERGY\nFIELD', subtitle: '🖱️ 滑动激活人体经络 / 点击释放能量脉冲', camPos: [0, 5, 18], targetPos: [0, 3, 0] },
+            { id: '06', title: 'FIREWORKS\nPHYSICS', subtitle: '🖱️ 点击绽放 / 长按蓄力 / 滑动留下轨迹', camPos: [0, 0, 25], targetPos: [0, 0, 0] }
+        ];
+
+        let currentPageIndex = 0;
+        let isTransitioning = false;
+
+        // --- 初始化 Three.js 基础 ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050505, 0.03);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(...PAGE_CONFIG[0].camPos);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxDistance = 30;
+
+        // 公用粒子贴图生成器
+        const createParticleTexture = (blur = 0.2) => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 32;
+            const context = canvas.getContext('2d');
+            const gradient = context.createRadialGradient(16, 16, 0, 16, 16, 16);
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(blur, 'rgba(255, 255, 255, 0.8)');
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            context.fillStyle = gradient;
+            context.fillRect(0, 0, 32, 32);
+            return new THREE.CanvasTexture(canvas);
+        };
+        const defaultParticleTex = createParticleTexture();
+
+        // 射线拾取器 (用于鼠标交互)
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // 隐形平面，用于捕捉鼠标在3D空间的位置 (水平面)
+        const intersectPlane = new THREE.Mesh(
+            new THREE.PlaneGeometry(100, 100),
+            new THREE.MeshBasicMaterial({ visible: false })
+        );
+        intersectPlane.rotation.x = -Math.PI / 2;
+        scene.add(intersectPlane);
+
+        // 新增：垂直隐形平面，用于捕捉人体页面的鼠标移动
+        const intersectPlaneVertical = new THREE.Mesh(
+            new THREE.PlaneGeometry(100, 100),
+            new THREE.MeshBasicMaterial({ visible: false })
+        );
+        scene.add(intersectPlaneVertical);
+
+        // --- 场景 01：宇宙探索 ---
+        const galaxyGroup = new THREE.Group();
+        scene.add(galaxyGroup);
+        let galaxyPoints = null;
+
+        function initGalaxy() {
+            const params = { count: 50000, size: 0.05, radius: 8, branches: 4, spin: 1.5, randomness: 0.5 };
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(params.count * 3);
+            const colors = new Float32Array(params.count * 3);
+            const colorInside = new THREE.Color('#ff6030');
+            const colorOutside = new THREE.Color('#1b3984');
+
+            for(let i = 0; i < params.count; i++) {
+                const i3 = i * 3;
+                const radius = Math.random() * params.radius;
+                const spinAngle = radius * params.spin;
+                const branchAngle = (i % params.branches) / params.branches * Math.PI * 2;
+
+                const rx = Math.pow(Math.random(), 3) * (Math.random() < 0.5 ? 1 : -1) * params.randomness * radius;
+                const ry = Math.pow(Math.random(), 3) * (Math.random() < 0.5 ? 1 : -1) * params.randomness * radius;
+                const rz = Math.pow(Math.random(), 3) * (Math.random() < 0.5 ? 1 : -1) * params.randomness * radius;
+
+                positions[i3] = Math.cos(branchAngle + spinAngle) * radius + rx;
+                positions[i3 + 1] = ry;
+                positions[i3 + 2] = Math.sin(branchAngle + spinAngle) * radius + rz;
+
+                const mixedColor = colorInside.clone().lerp(colorOutside, radius / params.radius);
+                colors[i3] = mixedColor.r; colors[i3+1] = mixedColor.g; colors[i3+2] = mixedColor.b;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({
+                size: params.size, sizeAttenuation: true, depthWrite: false,
+                blending: THREE.AdditiveBlending, vertexColors: true, map: defaultParticleTex, transparent: true
+            });
+
+            galaxyPoints = new THREE.Points(geometry, material);
+            galaxyPoints.rotation.x = 0.2;
+            galaxyPoints.rotation.z = -0.1;
+            galaxyGroup.add(galaxyPoints);
+        }
+        initGalaxy();
+
+        // --- 场景 02：声波可视化 ---
+        const audioGroup = new THREE.Group();
+        audioGroup.visible = false; // 初始隐藏
+        scene.add(audioGroup);
+        
+        let audioPoints;
+        let basePositions; // 存储原始坐标点
+        let mouseRipplePos = new THREE.Vector3(999, 0, 999);
+        let rippleIntensity = 0;
+
+        function initAudioVisualizer() {
+            const size = 40;
+            const segments = 120;
+            const geo = new THREE.BufferGeometry();
+            const count = (segments + 1) * (segments + 1);
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+
+            let index = 0;
+            for(let i = 0; i <= segments; i++) {
+                for(let j = 0; j <= segments; j++) {
+                    const x = (i / segments - 0.5) * size;
+                    const z = (j / segments - 0.5) * size;
+                    positions[index * 3] = x;
+                    positions[index * 3 + 1] = 0;
+                    positions[index * 3 + 2] = z;
+                    
+                    colors[index * 3] = 0.2; 
+                    colors[index * 3 + 1] = 0.5; 
+                    colors[index * 3 + 2] = 1.0;
+                    index++;
+                }
+            }
+
+            basePositions = new Float32Array(positions); // 备份基准点
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const mat = new THREE.PointsMaterial({
+                size: 0.15, sizeAttenuation: true, depthWrite: false,
+                blending: THREE.AdditiveBlending, vertexColors: true, map: defaultParticleTex, transparent: true
+            });
+
+            audioPoints = new THREE.Points(geo, mat);
+            audioGroup.add(audioPoints);
+        }
+        initAudioVisualizer();
+
+        function updateAudioWave(time) {
+            if(!audioGroup.visible) return;
+            
+            const positions = audioPoints.geometry.attributes.position.array;
+            const colors = audioPoints.geometry.attributes.color.array;
+            const count = positions.length / 3;
+            
+            // 涟漪强度随时间衰减
+            rippleIntensity = Math.max(0, rippleIntensity - 0.05);
+
+            for(let i = 0; i < count; i++) {
+                const x = basePositions[i*3];
+                const z = basePositions[i*3+2];
+                
+                // 基础波浪 (两组正弦波叠加)
+                let y = Math.sin(x * 0.3 + time * 2) * 0.5 + Math.cos(z * 0.4 + time * 1.5) * 0.5;
+
+                // 鼠标交互产生的波纹
+                const distToMouse = Math.sqrt((x - mouseRipplePos.x)**2 + (z - mouseRipplePos.z)**2);
+                if (distToMouse < 8) {
+                    // 距离鼠标越近，受到的影响越大
+                    const impact = Math.sin(distToMouse * 2 - time * 10) * (8 - distToMouse) * 0.2;
+                    y += impact * (1 + rippleIntensity);
+                }
+
+                positions[i*3+1] = y;
+
+                // 基于高度计算颜色 (低处偏蓝紫，高处偏青白)
+                const heightRatio = (y + 1) / 3;
+                colors[i*3] = 0.2 + heightRatio * 0.5;   // R
+                colors[i*3+1] = 0.4 + heightRatio * 0.6; // G
+                colors[i*3+2] = 1.0;                     // B
+            }
+            audioPoints.geometry.attributes.position.needsUpdate = true;
+            audioPoints.geometry.attributes.color.needsUpdate = true;
+        }
+
+        // --- 场景 03：生命之树 ---
+        const treeGroup = new THREE.Group();
+        treeGroup.visible = false;
+        treeGroup.position.y = -5; // 将树根往下移，使其居中
+        scene.add(treeGroup);
+
+        let treePoints;
+        let treeBasePositions;
+        let treeColorsBase;
+        let treeBloomIntensity = 0; // 生长爆发的强度
+
+        function initTreeOfLife() {
+            const pointsArr = [];
+            const colorsArr = [];
+            
+            // 递归分形算法生成树枝和树叶
+            function growBranch(p, dir, len, depth) {
+                if (depth === 0) {
+                    // 到达末端，生成树叶粒子簇
+                    for(let i=0; i<20; i++) {
+                        pointsArr.push(p.x + (Math.random()-0.5)*3, p.y + (Math.random()-0.5)*3, p.z + (Math.random()-0.5)*3);
+                        colorsArr.push(0.3, 0.9, 0.4); // 树叶呈现高亮嫩绿色
+                    }
+                    return;
+                }
+                
+                // 生成树干路径点
+                const steps = 8;
+                for(let i=0; i<steps; i++) {
+                    const t = i/steps;
+                    const cp = new THREE.Vector3().copy(p).add(dir.clone().multiplyScalar(len * t));
+                    // 增加少量随机偏移，让树枝看起来更自然粗糙
+                    cp.x += (Math.random()-0.5)*0.2; 
+                    cp.z += (Math.random()-0.5)*0.2; 
+                    pointsArr.push(cp.x, cp.y, cp.z);
+                    
+                    // 颜色渐变：从底部的暗棕色向上渐变到树枝的青绿色
+                    const heightRatio = Math.min(1.0, cp.y / 20); 
+                    colorsArr.push(0.4 - heightRatio*0.2, 0.2 + heightRatio*0.5, 0.1 + heightRatio*0.1);
+                }
+                
+                const endP = new THREE.Vector3().copy(p).add(dir.clone().multiplyScalar(len));
+
+                // 树枝分叉：每段随机分出 2 到 3 根新树枝
+                const numBranches = Math.floor(Math.random() * 2) + 2; 
+                for(let i=0; i<numBranches; i++) {
+                    const newDir = dir.clone();
+                    // 在 3D 空间内随机旋转一个角度
+                    const axis = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+                    const angle = Math.random() * 0.6 + 0.2;
+                    newDir.applyAxisAngle(axis, angle);
+                    growBranch(endP, newDir, len * 0.75, depth - 1);
+                }
+            }
+
+            // 从中心点开始向上生长，深度设为 7
+            growBranch(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0), 6, 7);
+
+            const geo = new THREE.BufferGeometry();
+            const posArray = new Float32Array(pointsArr);
+            treeBasePositions = new Float32Array(pointsArr); // 备份原始坐标计算风力
+            treeColorsBase = new Float32Array(colorsArr);
+
+            geo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colorsArr), 3));
+
+            const mat = new THREE.PointsMaterial({
+                size: 0.15, sizeAttenuation: true, depthWrite: false,
+                blending: THREE.AdditiveBlending, vertexColors: true, map: defaultParticleTex, transparent: true
+            });
+
+            treePoints = new THREE.Points(geo, mat);
+            treeGroup.add(treePoints);
+        }
+        initTreeOfLife();
+
+        function updateTreeOfLife(time) {
+            if(!treeGroup.visible) return;
+            const positions = treePoints.geometry.attributes.position.array;
+            const colors = treePoints.geometry.attributes.color.array;
+            const count = positions.length / 3;
+
+            // 每帧衰减爆发强度
+            treeBloomIntensity = Math.max(0, treeBloomIntensity - 0.02);
+
+            for(let i = 0; i < count; i++) {
+                const bx = treeBasePositions[i*3];
+                const by = treeBasePositions[i*3+1];
+                const bz = treeBasePositions[i*3+2];
+
+                // 1. 基础自然风：高度(by)越高，摆动幅度越大
+                const swayAmt = Math.pow(Math.max(0, by) / 20, 1.5); 
+                const windX = Math.sin(time * 1.5 + by * 0.5) * swayAmt * 1.5;
+                const windZ = Math.cos(time * 1.2 + by * 0.4) * swayAmt * 1.5;
+
+                // 2. 鼠标排斥风力：估算鼠标在 3D 空间中的投影区域
+                const mX = mouse.x * 12; // 屏幕X映射
+                const mY = (mouse.y + 1) * 8; // 屏幕Y映射 (相对于树根起算)
+                
+                const distToMouse = Math.sqrt((bx + windX - mX)**2 + (by - mY)**2);
+                let repelX = 0, repelZ = 0;
+                
+                // 仅对有一定高度的枝叶产生排斥风力
+                if(distToMouse < 5 && by > 3) { 
+                    const force = (5 - distToMouse) * 0.4;
+                    repelX = (bx - mX) / distToMouse * force;
+                    repelZ = -force * 0.8; // 将叶子向屏幕内(Z轴负向)吹
+                }
+
+                // 3. 点击爆发效果：让粒子暂时炸开变高
+                const burstY = treeBloomIntensity * Math.random() * swayAmt * 2.0;
+                const burstX = treeBloomIntensity * (Math.random()-0.5) * swayAmt * 2.0;
+
+                positions[i*3] = bx + windX + repelX + burstX;
+                positions[i*3+1] = by + burstY;
+                positions[i*3+2] = bz + windZ + repelZ;
+
+                // 4. 颜色爆发高亮
+                const cr = treeColorsBase[i*3], cg = treeColorsBase[i*3+1], cb = treeColorsBase[i*3+2];
+                colors[i*3] = Math.min(1.0, cr + treeBloomIntensity * 0.6);   // R
+                colors[i*3+1] = Math.min(1.0, cg + treeBloomIntensity * 0.8); // G 爆发时偏绿偏白
+                colors[i*3+2] = Math.min(1.0, cb + treeBloomIntensity * 0.2); // B
+            }
+            treePoints.geometry.attributes.position.needsUpdate = true;
+            treePoints.geometry.attributes.color.needsUpdate = true;
+        }
+
+        // --- 场景 04：粒子锦鲤 (双鱼争食与成长) ---
+        const koiGroup = new THREE.Group();
+        koiGroup.visible = false;
+        scene.add(koiGroup);
+
+        // 1. 添加背景环境粒子 (模拟水中的微生物/星尘)
+        const ambCount = 3000;
+        const ambGeo = new THREE.BufferGeometry();
+        const ambPos = new Float32Array(ambCount * 3);
+        for(let i=0; i<ambCount*3; i++) {
+            ambPos[i] = (Math.random() - 0.5) * 50; // 散布在很大的空间内
+        }
+        ambGeo.setAttribute('position', new THREE.BufferAttribute(ambPos, 3));
+        const ambMat = new THREE.PointsMaterial({
+            size: 0.08, color: 0x4488ff, transparent: true, opacity: 0.3,
+            map: defaultParticleTex, blending: THREE.AdditiveBlending, depthWrite: false
+        });
+        const ambPoints = new THREE.Points(ambGeo, ambMat);
+        koiGroup.add(ambPoints);
+
+        // 2. 投喂的食物视觉效果
+        let foodTarget = null;
+        const foodGeo = new THREE.BufferGeometry();
+        foodGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0,0,0]), 3));
+        const foodMat = new THREE.PointsMaterial({
+            size: 1.5, color: 0xffaa00, map: defaultParticleTex, 
+            transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
+        });
+        const foodMesh = new THREE.Points(foodGeo, foodMat);
+        foodMesh.visible = false; // 初始隐藏
+        koiGroup.add(foodMesh);
+
+        // 3. 封装锦鲤类 (支持多只实例化和尺寸缩放)
+        class KoiFish {
+            constructor(colorMain, colorSub, startPos) {
+                this.scale = 1.0; // 成长倍率
+                this.spineSegments = 20;
+                this.baseSegmentLength = 0.6;
+                this.spine = [];
+                for(let i=0; i<this.spineSegments; i++) {
+                    this.spine.push(new THREE.Vector3(startPos.x, startPos.y, startPos.z - i * this.baseSegmentLength));
+                }
+                
+                this.targetPos = startPos.clone();
+                this.partCount = 4000;
+                this.koiData = [];
+                this.geo = new THREE.BufferGeometry();
+                
+                // 给不同锦鲤一点性格差异 (摆动频率和游速)
+                this.wiggleSpeed = 8 + Math.random() * 4;
+                this.swimSpeed = 0.03 + Math.random() * 0.02;
+
+                const pos = new Float32Array(this.partCount * 3);
+                const col = new Float32Array(this.partCount * 3);
+                const cMain = new THREE.Color(colorMain);
+                const cSub = new THREE.Color(colorSub);
+
+                for(let i=0; i<this.partCount; i++) {
+                    const segIdx = Math.floor(Math.random() * this.spineSegments);
+                    const t = segIdx / (this.spineSegments - 1);
+                    
+                    let radius = Math.sin(t * Math.PI) * 1.5; 
+                    if(t < 0.1) radius *= 0.5;
+                    if(t > 0.9) radius *= 0.2;
+
+                    const angle = Math.random() * Math.PI * 2;
+                    const r = Math.sqrt(Math.random()) * radius; 
+                    let ox = Math.cos(angle) * r;
+                    let oy = Math.sin(angle) * r * 0.8; 
+
+                    if (t > 0.8) { ox *= 0.1; oy *= 2.5; }
+                    if (t > 0.15 && t < 0.25 && Math.random() > 0.85) {
+                        ox = (Math.random() > 0.5 ? 1 : -1) * (radius + Math.random() * 2.5);
+                        oy *= 0.1;
+                    }
+
+                    this.koiData.push({ seg: segIdx, offset: new THREE.Vector3(ox, oy, 0) });
+
+                    const isMain = Math.random() > (t * 0.6); 
+                    const color = isMain ? cMain : cSub;
+                    col[i*3] = color.r; col[i*3+1] = color.g; col[i*3+2] = color.b;
+                }
+
+                this.geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                this.geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+
+                this.mat = new THREE.PointsMaterial({
+                    size: 0.12, transparent: true, blending: THREE.AdditiveBlending,
+                    vertexColors: true, map: defaultParticleTex, depthWrite: false
+                });
+
+                this.points = new THREE.Points(this.geo, this.mat);
+                koiGroup.add(this.points);
+            }
+
+            update(time, currentFood, allFishes) {
+                let isChasingFood = false;
+
+                // 1. 决定游动目标
+                if (currentFood) {
+                    // 争抢食物，速度稍微变快
+                    this.targetPos.lerp(currentFood, this.swimSpeed * 1.5);
+                    isChasingFood = true;
+                    
+                    // 判定是否吃到食物 (距离判定随体型增大而增大)
+                    if (this.spine[0].distanceTo(currentFood) < 1.5 * this.scale) {
+                        // 吃到食物，触发成长变大
+                        this.scale = Math.min(this.scale + 0.15, 3.5); // 最大成长倍数限制在 3.5 倍
+                        return true; // 返回 true 通知主循环食物被吃掉了
+                    }
+                } else if (mouseRipplePos.x !== 999) {
+                    // 跟随水流(鼠标)
+                    this.targetPos.lerp(mouseRipplePos, this.swimSpeed);
+                } else {
+                    // 默认巡游
+                    this.targetPos.set(
+                        Math.cos(time * 0.3) * 10, 
+                        0, 
+                        Math.sin(time * 0.3) * 10
+                    );
+                }
+
+                // 2. 摆头动效 (游向食物时摆动更剧烈)
+                const wiggleTarget = this.targetPos.clone();
+                const dirToTarget = new THREE.Vector3().subVectors(wiggleTarget, this.spine[0]).normalize();
+                if(dirToTarget.lengthSq() > 0) {
+                    const perp = new THREE.Vector3(-dirToTarget.z, 0, dirToTarget.x).normalize();
+                    const curWiggleSpeed = isChasingFood ? this.wiggleSpeed * 1.5 : this.wiggleSpeed;
+                    wiggleTarget.add(perp.multiplyScalar(Math.sin(time * curWiggleSpeed) * 1.5 * this.scale));
+                }
+
+                // --- 新增：锦鲤之间的相互斥力 (防止穿模，增加灵动感) ---
+                if (allFishes) {
+                    let repulsion = new THREE.Vector3();
+                    for(let other of allFishes) {
+                        if (other === this) continue; // 不与自己计算
+                        
+                        const dist = this.spine[0].distanceTo(other.spine[0]);
+                        // 安全距离与双方当前的体型（scale）成正比
+                        const safeDist = (this.scale + other.scale) * 2.5; 
+                        
+                        if (dist < safeDist && dist > 0.1) {
+                            // 计算推开的方向
+                            const pushDir = new THREE.Vector3().subVectors(this.spine[0], other.spine[0]).normalize();
+                            // 距离越近，斥力越强
+                            const force = (safeDist - dist) * 0.3; 
+                            repulsion.add(pushDir.multiplyScalar(force));
+                        }
+                    }
+                    wiggleTarget.add(repulsion); // 将斥力叠加到头部的最终目标点上
+                }
+
+                // 3. 骨骼 IK 解算 (结合当前成长比例 this.scale)
+                this.spine[0].lerp(wiggleTarget, 0.08); 
+                const currentSegmentLength = this.baseSegmentLength * this.scale;
+                for(let i = 1; i < this.spineSegments; i++) {
+                    const dir = new THREE.Vector3().subVectors(this.spine[i-1], this.spine[i]).normalize();
+                    if(dir.lengthSq() === 0) dir.set(0, 0, 1);
+                    const nextPos = this.spine[i-1].clone().sub(dir.multiplyScalar(currentSegmentLength));
+                    this.spine[i].lerp(nextPos, 0.4); 
+                }
+
+                // 4. 更新粒子坐标
+                const pos = this.geo.attributes.position.array;
+                for(let i = 0; i < this.partCount; i++) {
+                    const data = this.koiData[i];
+                    const sIdx = data.seg;
+                    
+                    let dir = new THREE.Vector3(0, 0, 1);
+                    if (sIdx > 0) dir.subVectors(this.spine[sIdx-1], this.spine[sIdx]).normalize();
+                    else dir.subVectors(this.spine[0], this.spine[1]).normalize();
+                    
+                    const up = new THREE.Vector3(0, 1, 0);
+                    if(Math.abs(dir.y) > 0.99) up.set(1, 0, 0); 
+                    const right = new THREE.Vector3().crossVectors(up, dir).normalize();
+                    const realUp = new THREE.Vector3().crossVectors(dir, right).normalize();
+
+                    // 偏移量也需要根据成长比例进行缩放
+                    const finalPos = this.spine[sIdx].clone()
+                        .add(right.multiplyScalar(data.offset.x * this.scale))
+                        .add(realUp.multiplyScalar(data.offset.y * this.scale));
+
+                    pos[i*3] = finalPos.x; pos[i*3+1] = finalPos.y; pos[i*3+2] = finalPos.z;
+                }
+                this.geo.attributes.position.needsUpdate = true;
+                
+                // 粒子本身的大小也随之成长
+                this.mat.size = 0.12 * this.scale;
+                
+                return false; // 没吃到食物
+            }
+        }
+
+        // 初始化两只锦鲤 (经典橙红与幽蓝)
+        const koiFishes = [];
+        function initKoiScene() {
+            koiFishes.push(new KoiFish('#ff4400', '#ffffff', new THREE.Vector3(5, 0, 0))); // 橙色一号
+            koiFishes.push(new KoiFish('#0088ff', '#00ffff', new THREE.Vector3(-5, 0, 5))); // 蓝色二号
+        }
+        initKoiScene();
+
+        function updateParticleKoi(time) {
+            if(!koiGroup.visible) return;
+
+            // 环境粒子缓慢漂浮转动
+            ambPoints.rotation.y = time * 0.02;
+            ambPoints.rotation.x = Math.sin(time * 0.05) * 0.1;
+
+            // 让食物闪烁
+            if (foodTarget) {
+                foodMesh.material.opacity = 0.5 + Math.sin(time * 15) * 0.5;
+            }
+
+            // 更新所有锦鲤，并判定是否吃到食物
+            let foodEaten = false;
+            for(let koi of koiFishes) {
+                // 将所有锦鲤数组 koiFishes 作为第三个参数传入，用于计算斥力
+                if (koi.update(time, foodTarget, koiFishes)) {
+                    foodEaten = true;
+                }
+            }
+
+            // 如果被吃掉，隐藏食物
+            if (foodEaten) {
+                foodTarget = null;
+                foodMesh.visible = false;
+            }
+        }
+
+        // --- 场景 05：人体能量场 ---
+        const humanGroup = new THREE.Group();
+        humanGroup.visible = false;
+        scene.add(humanGroup);
+
+        let humanPoints, humanLines;
+        let humanBasePos = [];
+        let humanEnergyPulse = 0;
+
+        function initHumanEnergyField() {
+            const particleCount = 6000; 
+            const posArr = [];
+            const colArr = [];
+            const colorBase = new THREE.Color('#0066ff'); // 基础幽蓝色
+
+            // 1. 程序化生成人体点云 (使用多个椭球体组合判定)
+            // 尝试随机生成点，如果点在设定的“人体部位”几何体内，则保留
+            for(let i=0; i<40000 && humanBasePos.length < particleCount; i++) {
+                const x = (Math.random() - 0.5) * 10;
+                const y = (Math.random() - 0.5) * 16 + 3; // 高度范围 -5 到 11
+                const z = (Math.random() - 0.5) * 4;
+
+                // 椭球体方程: (X/a)^2 + ((Y-y0)/b)^2 + (Z/c)^2 <= 1
+                const inHead = Math.pow(x/1.0, 2) + Math.pow((y-8.5)/1.2, 2) + Math.pow(z/1.0, 2) <= 1;
+                const inTorso = Math.pow(x/2.2, 2) + Math.pow((y-4.5)/3.0, 2) + Math.pow(z/1.2, 2) <= 1;
+                const inLArm = Math.pow((x+2.8)/0.7, 2) + Math.pow((y-4.0)/2.5, 2) + Math.pow(z/0.7, 2) <= 1;
+                const inRArm = Math.pow((x-2.8)/0.7, 2) + Math.pow((y-4.0)/2.5, 2) + Math.pow(z/0.7, 2) <= 1;
+                const inLLeg = Math.pow((x+1.0)/0.9, 2) + Math.pow((y-0.0)/3.5, 2) + Math.pow(z/0.9, 2) <= 1;
+                const inRLeg = Math.pow((x-1.0)/0.9, 2) + Math.pow((y-0.0)/3.5, 2) + Math.pow(z/0.9, 2) <= 1;
+
+                if(inHead || inTorso || inLArm || inRArm || inLLeg || inRLeg) {
+                    // 加入一点噪点，让它看起来像能量场而不是实心塑料
+                    const nx = x + (Math.random()-0.5)*0.4;
+                    const ny = y + (Math.random()-0.5)*0.4;
+                    const nz = z + (Math.random()-0.5)*0.4;
+                    
+                    posArr.push(nx, ny, nz);
+                    humanBasePos.push(new THREE.Vector3(nx, ny, nz));
+                    colArr.push(colorBase.r, colorBase.g, colorBase.b);
+                }
+            }
+
+            const actualCount = humanBasePos.length;
+            const pGeo = new THREE.BufferGeometry();
+            pGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(posArr), 3));
+            pGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colArr), 3));
+
+            const pMat = new THREE.PointsMaterial({
+                size: 0.12, transparent: true, blending: THREE.AdditiveBlending,
+                vertexColors: true, map: defaultParticleTex, depthWrite: false
+            });
+            humanPoints = new THREE.Points(pGeo, pMat);
+            humanGroup.add(humanPoints);
+
+            // 2. 生成经络连线 (寻找邻近点相连)
+            const linePos = [];
+            const lineCol = [];
+            // 为了性能，只取部分点进行连线 (每隔 3 个点取一个)
+            for(let i=0; i<actualCount; i+=3) {
+                for(let j=i+1; j<actualCount; j+=3) {
+                    if(humanBasePos[i].distanceTo(humanBasePos[j]) < 0.65) {
+                        linePos.push(humanBasePos[i].x, humanBasePos[i].y, humanBasePos[i].z);
+                        linePos.push(humanBasePos[j].x, humanBasePos[j].y, humanBasePos[j].z);
+                        lineCol.push(0, 0.2, 0.5,  0, 0.2, 0.5); // 默认暗蓝色的线
+                    }
+                }
+            }
+            const lGeo = new THREE.BufferGeometry();
+            lGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(linePos), 3));
+            lGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(lineCol), 3));
+            const lMat = new THREE.LineBasicMaterial({
+                vertexColors: true, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending
+            });
+            humanLines = new THREE.LineSegments(lGeo, lMat);
+            humanGroup.add(humanLines);
+        }
+        initHumanEnergyField();
+
+        function updateHumanEnergyField(time) {
+            if(!humanGroup.visible) return;
+
+            // 整体缓慢自转
+            humanGroup.rotation.y = Math.sin(time * 0.2) * 0.5;
+
+            const pColors = humanPoints.geometry.attributes.color.array;
+            const actualCount = humanBasePos.length;
+            const colorBase = new THREE.Color('#0044aa');
+            const colorHighlight = new THREE.Color('#ff00aa'); // 激活时的紫粉色
+            const chestCenter = new THREE.Vector3(0, 4.5, 0); // 胸口脉冲中心点
+
+            humanEnergyPulse = Math.max(0, humanEnergyPulse - 0.02); // 脉冲衰减
+            const currentPulseRadius = (1.0 - humanEnergyPulse) * 15.0; // 脉冲波扩散半径
+
+            // 更新粒子颜色 (受鼠标悬停和点击脉冲影响)
+            for(let i = 0; i < actualCount; i++) {
+                const pos = humanBasePos[i];
+                // 转换为世界坐标计算鼠标距离
+                const worldPos = pos.clone().applyMatrix4(humanGroup.matrixWorld);
+                const distToMouse = worldPos.distanceTo(mouseRipplePos);
+                
+                let mixRatio = 0;
+
+                // 1. 鼠标悬停的高亮场
+                if (distToMouse < 3.0) {
+                    mixRatio = 1.0 - (distToMouse / 3.0);
+                }
+
+                // 2. 点击产生的扩散脉冲场
+                if (humanEnergyPulse > 0) {
+                    const distToChest = pos.distanceTo(chestCenter);
+                    // 如果粒子处于脉冲波的圆环边缘
+                    if (Math.abs(distToChest - currentPulseRadius) < 1.5) {
+                        mixRatio = Math.max(mixRatio, humanEnergyPulse);
+                    }
+                }
+
+                // 3. 基础呼吸效果
+                mixRatio += (Math.sin(time * 2 + pos.y * 0.5) * 0.5 + 0.5) * 0.15;
+
+                const finalColor = colorBase.clone().lerp(colorHighlight, Math.min(1.0, mixRatio));
+                pColors[i*3] = finalColor.r;
+                pColors[i*3+1] = finalColor.g;
+                pColors[i*3+2] = finalColor.b;
+            }
+            humanPoints.geometry.attributes.color.needsUpdate = true;
+
+            // 为了性能，经络线的颜色随粒子整体状态闪烁，而不是逐根计算
+            humanLines.material.opacity = 0.1 + (humanEnergyPulse * 0.6) + (Math.sin(time*3)*0.05);
+        }
+
+        // --- 场景 06：粒子烟花 (交互版) ---
+        const interactiveFireworksGroup = new THREE.Group();
+        interactiveFireworksGroup.visible = false;
+        scene.add(interactiveFireworksGroup);
+
+        let activeInteractiveFireworks = [];
+        let trailParticles = [];
+        let isChargingFirework = false;
+        let chargeStartTime = 0;
+
+        // 生成交互式烟花爆炸
+        function createInteractiveExplosion(position, powerMultiplier = 1.0) {
+            const particleCount = Math.floor(1000 * powerMultiplier); // 蓄力越久粒子越多
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(particleCount * 3);
+            const vels = [];
+            const colors = new Float32Array(particleCount * 3);
+            const colorObj = new THREE.Color();
+            
+            // 随机生成主色调
+            colorObj.setHSL(Math.random(), 0.8 + Math.random()*0.2, 0.5 + Math.random()*0.2); 
+
+            for(let i=0; i<particleCount; i++) {
+                pos[i*3] = position.x; 
+                pos[i*3+1] = position.y; 
+                pos[i*3+2] = position.z;
+                
+                // 球形发散，增加随机噪点让烟花更自然
+                const theta = Math.random() * 2 * Math.PI;
+                const phi = Math.acos(Math.random() * 2 - 1);
+                
+                // 蓄力越久，爆炸初速度越大
+                const baseSpeed = Math.random() * 0.8 + 0.2;
+                const speed = baseSpeed * (1 + powerMultiplier * 0.5); 
+
+                vels.push(new THREE.Vector3(
+                    speed * Math.sin(phi) * Math.cos(theta),
+                    speed * Math.sin(phi) * Math.sin(theta),
+                    speed * Math.cos(phi)
+                ));
+
+                // 混入少量白色高亮粒子
+                if (Math.random() > 0.85) {
+                    colors[i*3] = 1; colors[i*3+1] = 1; colors[i*3+2] = 1;
+                } else {
+                    colors[i*3] = colorObj.r; colors[i*3+1] = colorObj.g; colors[i*3+2] = colorObj.b;
+                }
+            }
+
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const mat = new THREE.PointsMaterial({
+                size: 0.15 * (1 + powerMultiplier * 0.2), // 蓄力越大粒子稍微越大
+                transparent: true, blending: THREE.AdditiveBlending,
+                vertexColors: true, map: defaultParticleTex, depthWrite: false
+            });
+
+            const points = new THREE.Points(geo, mat);
+            interactiveFireworksGroup.add(points);
+            
+            activeInteractiveFireworks.push({ 
+                points, vels, age: 0, 
+                life: 120 + Math.floor(powerMultiplier * 30) // 蓄力越大存活越久
+            });
+        }
+
+        // 生成拖拽轨迹粒子
+        function spawnTrailParticle(position) {
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([position.x, position.y, position.z]), 3));
+            const mat = new THREE.PointsMaterial({
+                size: 0.2, color: 0xffddaa, transparent: true,
+                blending: THREE.AdditiveBlending, map: defaultParticleTex, depthWrite: false
+            });
+            const point = new THREE.Points(geo, mat);
+            interactiveFireworksGroup.add(point);
+            
+            trailParticles.push({
+                point, age: 0, life: 30,
+                vel: new THREE.Vector3((Math.random()-0.5)*0.2, Math.random()*0.1, (Math.random()-0.5)*0.2) // 轨迹微弱向上飘散
+            });
+        }
+
+        function updateInteractiveFireworks() {
+            if(!interactiveFireworksGroup.visible) return;
+
+            // 更新爆炸粒子
+            for(let i = activeInteractiveFireworks.length - 1; i >= 0; i--) {
+                const fw = activeInteractiveFireworks[i];
+                const positions = fw.points.geometry.attributes.position.array;
+                
+                for(let j=0; j<positions.length/3; j++) {
+                    positions[j*3] += fw.vels[j].x;
+                    positions[j*3+1] += fw.vels[j].y;
+                    positions[j*3+2] += fw.vels[j].z;
+                    // 核心物理：重力下坠与空气阻力衰减
+                    fw.vels[j].y -= 0.012; 
+                    fw.vels[j].multiplyScalar(0.95); 
+                }
+                fw.points.geometry.attributes.position.needsUpdate = true;
+                fw.points.material.opacity = 1 - Math.pow(fw.age / fw.life, 2); // 抛物线衰减，结尾消失得快
+                fw.age++;
+
+                if(fw.age >= fw.life) {
+                    interactiveFireworksGroup.remove(fw.points);
+                    fw.points.geometry.dispose();
+                    fw.points.material.dispose();
+                    activeInteractiveFireworks.splice(i, 1);
+                }
+            }
+
+            // 更新轨迹粒子
+            for(let i = trailParticles.length - 1; i >= 0; i--) {
+                const tr = trailParticles[i];
+                tr.point.position.add(tr.vel);
+                tr.point.material.opacity = 1 - (tr.age / tr.life);
+                tr.age++;
+                if(tr.age >= tr.life) {
+                    interactiveFireworksGroup.remove(tr.point);
+                    tr.point.geometry.dispose();
+                    tr.point.material.dispose();
+                    trailParticles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- 鼠标交互监听 (作用于全场景) ---
+        window.addEventListener('pointermove', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            if((currentPageIndex >= 1 && currentPageIndex <= 3) && !isTransitioning) {
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObject(intersectPlane); // 水平交互平面
+                if(intersects.length > 0) {
+                    mouseRipplePos.lerp(intersects[0].point, 0.2);
+                }
+            } else if (currentPageIndex === 4 && !isTransitioning) {
+                // 05 页面使用垂直交互平面
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObject(intersectPlaneVertical); 
+                if(intersects.length > 0) {
+                    mouseRipplePos.lerp(intersects[0].point, 0.3);
+                }
+            } else if (currentPageIndex === 5 && !isTransitioning) {
+                // 06 页面：更新鼠标位置，如果是蓄力拖拽状态，生成轨迹
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObject(intersectPlaneVertical); 
+                if(intersects.length > 0) {
+                    mouseRipplePos.copy(intersects[0].point);
+                    if (isChargingFirework) {
+                        spawnTrailParticle(mouseRipplePos.clone());
+                    }
+                }
+            }
+        });
+
+        window.addEventListener('pointerdown', () => {
+            if(currentPageIndex === 1 && !isTransitioning) {
+                rippleIntensity = 5.0; // 02页面
+            } else if (currentPageIndex === 2 && !isTransitioning) {
+                treeBloomIntensity = 2.0; // 03页面
+            } else if (currentPageIndex === 3 && !isTransitioning) {
+                // 04页面投喂
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObject(intersectPlane);
+                if(intersects.length > 0) {
+                    foodTarget = intersects[0].point.clone(); 
+                    foodMesh.geometry.attributes.position.array[0] = foodTarget.x;
+                    foodMesh.geometry.attributes.position.array[1] = foodTarget.y;
+                    foodMesh.geometry.attributes.position.array[2] = foodTarget.z;
+                    foodMesh.geometry.attributes.position.needsUpdate = true;
+                    foodMesh.visible = true;
+                }
+            } else if (currentPageIndex === 4 && !isTransitioning) {
+                // 05页面：释放人体能量脉冲
+                humanEnergyPulse = 1.0; 
+            } else if (currentPageIndex === 5 && !isTransitioning) {
+                // 06页面：开始蓄力
+                isChargingFirework = true;
+                chargeStartTime = Date.now();
+            }
+        });
+
+        // 新增全局 pointerup 事件，用于处理烟花的蓄力释放
+        window.addEventListener('pointerup', () => {
+            if (currentPageIndex === 5 && !isTransitioning && isChargingFirework) {
+                isChargingFirework = false;
+                // 计算蓄力时间 (秒)
+                const chargeDuration = (Date.now() - chargeStartTime) / 1000;
+                // 将蓄力时间映射为烟花威力倍数 (1倍 到 最高4倍)
+                const powerMultiplier = Math.min(1.0 + chargeDuration * 2.5, 4.0); 
+                
+                // 释放烟花
+                createInteractiveExplosion(mouseRipplePos.clone(), powerMultiplier);
+            }
+        });
+
+        // --- 转场特效：06 粒子烟花 ---
+        let fireworks = [];
+        
+        function createFireworkTransition(onMidPoint) {
+            // 在相机正前方创建一个爆炸点
+            const fwPos = camera.position.clone();
+            const dir = camera.getWorldDirection(new THREE.Vector3());
+            fwPos.add(dir.multiplyScalar(10)); // 放在相机前方10个单位处
+
+            const particleCount = 2000;
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(particleCount * 3);
+            const vels = [];
+            const colors = new Float32Array(particleCount * 3);
+            const colorObj = new THREE.Color();
+            colorObj.setHSL(Math.random(), 1.0, 0.6); // 随机绚丽色彩
+
+            for(let i=0; i<particleCount; i++) {
+                pos[i*3] = fwPos.x; pos[i*3+1] = fwPos.y; pos[i*3+2] = fwPos.z;
+                
+                // 球形随机发散速度
+                const theta = Math.random() * 2 * Math.PI;
+                const phi = Math.acos(Math.random() * 2 - 1);
+                const speed = Math.random() * 0.8 + 0.2;
+                vels.push(new THREE.Vector3(
+                    speed * Math.sin(phi) * Math.cos(theta),
+                    speed * Math.sin(phi) * Math.sin(theta),
+                    speed * Math.cos(phi)
+                ));
+
+                colors[i*3] = colorObj.r; colors[i*3+1] = colorObj.g; colors[i*3+2] = colorObj.b;
+            }
+
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const mat = new THREE.PointsMaterial({
+                size: 0.2, transparent: true, blending: THREE.AdditiveBlending,
+                vertexColors: true, map: defaultParticleTex, depthWrite: false
+            });
+
+            const points = new THREE.Points(geo, mat);
+            scene.add(points);
+            
+            const fireworkObj = { points, vels, age: 0, life: 100 };
+            fireworks.push(fireworkObj);
+
+            // 屏幕白光闪烁效果 (GSAP)
+            gsap.to('#flash-overlay', { 
+                opacity: 0.8, duration: 0.1, yoyo: true, repeat: 1,
+                onComplete: () => {
+                    // 闪光达到顶峰时，切换底部场景的可见性
+                    if(onMidPoint) onMidPoint();
+                }
+            });
+        }
+
+        function updateFireworks() {
+            for(let i = fireworks.length - 1; i >= 0; i--) {
+                const fw = fireworks[i];
+                const positions = fw.points.geometry.attributes.position.array;
+                
+                for(let j=0; j<positions.length/3; j++) {
+                    positions[j*3] += fw.vels[j].x;
+                    positions[j*3+1] += fw.vels[j].y;
+                    positions[j*3+2] += fw.vels[j].z;
+                    // 模拟重力和空气阻力
+                    fw.vels[j].y -= 0.015; 
+                    fw.vels[j].multiplyScalar(0.96); 
+                }
+                fw.points.geometry.attributes.position.needsUpdate = true;
+                fw.points.material.opacity = 1 - (fw.age / fw.life);
+                fw.age++;
+
+                if(fw.age >= fw.life) {
+                    scene.remove(fw.points);
+                    fw.points.geometry.dispose();
+                    fw.points.material.dispose();
+                    fireworks.splice(i, 1);
+                }
+            }
+        }
+
+        // --- 场景切换管理器 ---
+        function switchScene(index) {
+            if (index === currentPageIndex || isTransitioning) return;
+            isTransitioning = true;
+            
+            // 1. UI 文本淡出
+            gsap.to('#text-container', { opacity: 0, duration: 0.3, x: -30 });
+
+            // 2. 触发烟花爆炸转场
+            createFireworkTransition(() => {
+                // 3. 爆炸瞬间，隐藏所有场景，只显示目标场景
+                galaxyGroup.visible = (index === 0);
+                audioGroup.visible = (index === 1);
+                treeGroup.visible = (index === 2);
+                koiGroup.visible = (index === 3);
+                humanGroup.visible = (index === 4);
+                interactiveFireworksGroup.visible = (index === 5); // 06页面
+                // (后续其他场景在此添加判断)
+
+                // 4. 更新 UI 数据
+                const conf = PAGE_CONFIG[index];
+                document.getElementById('page-number').innerText = conf.id;
+                document.getElementById('page-title').innerText = conf.title;
+                document.getElementById('page-subtitle').innerText = conf.subtitle;
+                
+                // 5. 运镜：将相机平滑移动到新场景的最佳视角
+                gsap.to(camera.position, {
+                    x: conf.camPos[0], y: conf.camPos[1], z: conf.camPos[2],
+                    duration: 1.5, ease: "power2.out"
+                });
+                gsap.to(controls.target, {
+                    x: conf.targetPos[0], y: conf.targetPos[1], z: conf.targetPos[2],
+                    duration: 1.5, ease: "power2.out",
+                    onComplete: () => {
+                        // 6. 文本淡入，解除锁定
+                        gsap.to('#text-container', { opacity: 1, duration: 0.5, x: 0 });
+                        currentPageIndex = index;
+                        isTransitioning = false;
+                    }
+                });
+            });
+        }
+
+        // 导航绑定
+        const navDots = document.querySelectorAll('.nav-dot');
+        navDots.forEach(dot => {
+            dot.addEventListener('click', (e) => {
+                const targetIdx = parseInt(e.target.getAttribute('data-target'));
+                
+                navDots.forEach(d => d.classList.remove('active'));
+                e.target.classList.add('active');
+                switchScene(targetIdx);
+            });
+        });
+
+        // --- 动画主循环 ---
+        const clock = new THREE.Clock();
+        const tick = () => {
+            const time = clock.getElapsedTime();
+
+            // 场景专属动画更新
+            if(galaxyGroup.visible && galaxyPoints) galaxyPoints.rotation.y = time * 0.05;
+            if(audioGroup.visible) updateAudioWave(time);
+            if(treeGroup.visible) updateTreeOfLife(time);
+            if(koiGroup.visible) updateParticleKoi(time);
+            if(humanGroup.visible) updateHumanEnergyField(time);
+            if(interactiveFireworksGroup.visible) updateInteractiveFireworks(); // 06页面更新
+
+            // 全局动画更新
+            updateFireworks();
+            controls.update();
+            renderer.render(scene, camera);
+            window.requestAnimationFrame(tick);
+        };
+        tick();
+
+        // 窗口适配
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+    </script>
+</body>
+</html>

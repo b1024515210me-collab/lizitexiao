@@ -50,6 +50,17 @@
             background: #ffffff; opacity: 0; pointer-events: none; z-index: 5;
         }
 
+        /* 音乐播放时的旋转发光动画 */
+        @keyframes spinPulse {
+            0% { transform: scale(1) rotate(0deg); text-shadow: 0 0 10px rgba(0,150,255,0.5); }
+            50% { transform: scale(1.1) rotate(18deg); text-shadow: 0 0 20px rgba(0,150,255,1); }
+            100% { transform: scale(1) rotate(36deg); text-shadow: 0 0 10px rgba(0,150,255,0.5); }
+        }
+        .music-playing {
+            animation: spinPulse 3s alternate infinite ease-in-out;
+            color: #4facfe !important;
+        }
+
         @media (max-width: 768px) {
             .center-titles { left: 5%; text-align: center; width: 90%; }
             #page-title { font-size: 2rem; letter-spacing: 8px; }
@@ -60,11 +71,17 @@
 
     <div id="canvas-container"></div>
     <div id="flash-overlay"></div>
+    
+    <!-- 更换为极其稳定、专用于开发者测试的 SoundHelix 电子音乐，无跨域限制 -->
+    <audio id="bg-music" loop src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"></audio>
 
     <div id="ui-layer">
         <div class="top-nav">
             <button class="icon-btn">☰</button>
-            <button class="icon-btn">?</button>
+            <div style="display: flex; gap: 20px;">
+                <button class="icon-btn" id="music-btn" title="开启/关闭治愈音乐">🔇</button>
+                <button class="icon-btn">?</button>
+            </div>
         </div>
 
         <div class="center-titles" id="text-container">
@@ -1128,6 +1145,52 @@
             window.requestAnimationFrame(tick);
         };
         tick();
+
+        // --- 治愈背景音乐控制逻辑 ---
+        const bgMusic = document.getElementById('bg-music');
+        const musicBtn = document.getElementById('music-btn');
+        let isMusicPlaying = false;
+        let audioInitialized = false;
+
+        function toggleMusic() {
+            if (isMusicPlaying) {
+                bgMusic.pause();
+                musicBtn.innerText = '🔇';
+                musicBtn.classList.remove('music-playing');
+                isMusicPlaying = false;
+            } else {
+                // 确保音频已加载后再播放
+                let playPromise = bgMusic.play();
+                if (playPromise !== undefined) {
+                    playPromise.then(() => {
+                        musicBtn.innerText = '🎵';
+                        musicBtn.classList.add('music-playing');
+                        isMusicPlaying = true;
+                    }).catch(e => {
+                        console.error("音频播放被浏览器拦截或加载失败:", e);
+                        // 如果因为网络或策略失败，允许用户再次尝试
+                        audioInitialized = false; 
+                    });
+                }
+            }
+        }
+
+        // 点击右上角音乐图标触发
+        musicBtn.addEventListener('pointerdown', (e) => {
+            e.stopPropagation(); // 阻止事件冒泡到 window 触发底层的全局 pointerdown
+            toggleMusic();
+            audioInitialized = true;
+        });
+
+        // 第一次点击屏幕任意位置时自动尝试播放音乐 (解决浏览器自动播放限制)
+        window.addEventListener('pointerdown', () => {
+            if (!audioInitialized) {
+                // 稍微降低音量，显得更治愈柔和
+                bgMusic.volume = 0.5; 
+                toggleMusic();
+                audioInitialized = true;
+            }
+        });
 
         // 窗口适配
         window.addEventListener('resize', () => {
